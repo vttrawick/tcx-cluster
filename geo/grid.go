@@ -9,45 +9,47 @@ package geo
 
 const EarthRadiusInMeters float64 = 6371.009 * 1000
 
-// a coordinate on the earth
-// represented by lat / lon degrees
+// a coordinate on the earth represented by lat / lon degrees
 type GeoPoint struct {
-	lat, lon float64
+	LatitudeInDegrees, LongitudeInDegrees float64
 }
 
 // the minimum area bounded by the four lat / lon lines
+// all values in degrees
 type GeoRect struct {
-	minLat, maxLat, minLon, maxLon float64
+	MinLat, MaxLat, MinLon, MaxLon float64
 }
 
-func GridBoundary(paths ...[]tcx.Trackpoint) gridRect {
+type GeoGrid struct {
+	Boundary GeoRect
+	SubHeight, SubWidth int
+	// map from grid coordinate to point list
+}
 
-	r := gridRect{
-		minLat: 91
-		maxLat: -91
-		minLon: 181
-		maxLon: -181
+func GridBoundary(paths ...[]GeoPoint) GeoRect {
+
+	r := GeoRect{
+		MinLat: 91,
+		MaxLat: -91,
+		MinLon: 181,
+		MaxLon: -181,
 	}
 	for _, path := range(paths) {
 		for _, pt := range(path) {
-			if pt.LatitudeInDegrees < minLat {
-				r.minLat = pt.LatitudeInDegrees
+			if pt.LatitudeInDegrees < r.MinLat {
+				r.MinLat = pt.LatitudeInDegrees
 			}
-			if pt.LatitudeInDegrees > maxLat {
-				r.maxLat = pt.LatitudeInDegrees
+			if pt.LatitudeInDegrees > r.MaxLat {
+				r.MaxLat = pt.LatitudeInDegrees
 			}
-			if pt.LongitudeInDegrees < minLon {
-				r.minLon = pt.LongitudeInDegrees
+			if pt.LongitudeInDegrees < r.MinLon {
+				r.MinLon = pt.LongitudeInDegrees
 			}
-			if pt.LongitudeInDegrees > maxLon {
-				r.maxLon = pt.LongitudeInDegrees
+			if pt.LongitudeInDegrees > r.MaxLon {
+				r.MaxLon = pt.LongitudeInDegrees
 			}
 		}
 	}
-
 	return r
 }
 
-func Create(g GridRect) (*GridMap) {
-	
-}
