@@ -31,15 +31,15 @@ var path3 = []GeoPoint{
 	GeoPoint{42.365127, -71.103168},
 	GeoPoint{42.360831, -71.096162},
 	GeoPoint{42.359000, -71.100175},
-	GeoPoint{42.361164, -71.103930},
-	GeoPoint{42.365516, -71.103951},
+	GeoPoint{42.360352, -71.102460}, 
+	GeoPoint{42.361864, -71.100765},
 	GeoPoint{42.364667, -71.102567},
 }
 	
-func TestGridBoundary(t *testing.T) {
+func TestPathBoundary(t *testing.T) {
 
 	// find the min / max lat long for one path
-	boundary1 := GridBoundary(path1)
+	boundary1 := PathBoundary(path1)
 
 	// boundary should be:
 	// {
@@ -58,7 +58,7 @@ func TestGridBoundary(t *testing.T) {
 	}
 
 	// then for multiple
-	boundary2 := GridBoundary(path1, path2, path3)
+	boundary2 := PathBoundary(path1, path2, path3)
 
 	// boundary should be
 	// {
@@ -117,40 +117,83 @@ func TestGeoDistance(t *testing.T) {
 	}	
 }
 
+func TestPathLengthInMeters(t *testing.T) {
 
-func TestPathToGeoGrid(t *testing.T) {
+	l1 := PathLengthInMeters(path1)
+	if math.Abs(l1 - 2310) > 10 {
+		t.Errorf("path1 length calculated incorrectly")
+	}
+
+	l2 := PathLengthInMeters(path2)
+	if math.Abs(l2 - 1920) > 10 {
+		t.Errorf("path2 length calculated incorrectly")
+	}
+}
+
+func TestMakeGrid(t *testing.T) {
 
 	width := 7.0
 	height := 7.0
 
-	g1 := PathToGeoGrid(width, height, path1)
+	boundary := GeoRect{
+		NorthWest: GeoPoint{42.365592, -71.116022},
+		SouthEast: GeoPoint{42.361439, -71.103875},
+	}
+	
+	g1 := MakeGrid(width, height, boundary)
 
-	// some sanity checks on the grid
 	if (g1.CellWidth != width) {
 		t.Errorf("grid cell width differs from input")
 	}
 	if (g1.CellHeight != height) {
 		t.Errorf("grid cell height differs from input")
 	}
-	b1 := GeoRect{
-		NorthWest: GeoPoint{42.365592, -71.116022},
-		SouthEast: GeoPoint{42.361439, -71.103875},
-	}
-	if !reflect.DeepEqual(g1.Boundary, b1) {
+
+	if !reflect.DeepEqual(g1.Boundary, boundary) {
 		t.Errorf("grid boundary does not match expected")
-	}
-	// checking the cells is more involved
-	// split it off into its own function
-	checkCells(t, g1)
+	}	
 }
 
-func checkCells(t *testing.T, grid *GeoGrid) {
+func TestMapPoint(t *testing.T) {
+	grid := MakeGrid(7.0, 7.0, PathBoundary(path1))
 
+	c1 := grid.MapPoint(path1[0])
+	expected := cellCoord("0_142")
+	if c1 != expected {
+		t.Errorf(fmt.Sprintf("point %v mapped incorrectly: was %v but expected %v",
+			path1[0], c1, expected))
+	}
+
+	c2 := grid.MapPoint(path1[2])
+	expected = cellCoord("21_0")
+	if c2 != expected {
+		t.Errorf(fmt.Sprintf("point %v mapped incorrectly: was %v but expected %v",
+			path1[0], c2, expected))
+	}
+	
+	c3 := grid.MapPoint(path1[4])
+	expected = cellCoord("52_29")
+	if c3 != expected {
+		t.Errorf(fmt.Sprintf("point %v mapped incorrectly: was %v but expected %v",
+			path1[0], c3, expected))
+	}
+}
+
+func TestMapPath(t *testing.T) {
+
+	grid := MakeGrid(7.0, 7.0, PathBoundary(path1))
+	coords := grid.MapPath(path1)
+
+	if len(coords) != len(path1) {
+		t.Errorf("length mismatch between path and grid map")
+	}
+		
+	// ensure all points are within the grid
 	minLatCoord := math.MaxInt64
 	maxLatCoord := -1
 	minLonCoord := math.MaxInt64
 	maxLonCoord := -1
-	for coord, _ := range(grid.Cells) {
+	for _, coord := range(coords) {
 		parts := strings.Split(string(coord), "_")
 
 		latCoord, _ := strconv.Atoi(parts[0])
@@ -168,7 +211,7 @@ func checkCells(t *testing.T, grid *GeoGrid) {
 			minLonCoord = lonCoord
 		}
 	}
-
+	
 	minLat := grid.Boundary.SouthEast.LatitudeInDegrees
 	maxLat := grid.Boundary.NorthWest.LatitudeInDegrees
 	minLon := grid.Boundary.NorthWest.LongitudeInDegrees
@@ -193,5 +236,59 @@ func checkCells(t *testing.T, grid *GeoGrid) {
 	}
 	if maxLonCoord > maxLonCell {
 		t.Errorf(fmt.Sprintf("maximum longitude grid coordinate should less than %d", maxLonCell))
-	}	
+	}
+}
+
+func TestMergeGeoRect(t *testing.T) {
+
+	r1 := PathBoundary(path1)
+
+	m1 := MergeGeoRect(r1, r1)
+	if !reflect.DeepEqual(m1, r1) {
+		t.Errorf("merging two of the same GeoRect should yield the original")
+	}
+
+	r2 := PathBoundary(path2)
+	m2 := MergeGeoRect(r1, r2)
+	t2 := GeoRect{
+		NorthWest: GeoPoint{42.365592, -71.116022},
+		SouthEast: GeoPoint{42.360192, -71.103875},
+	}
+	if !reflect.DeepEqual(m2, t2) {
+		t.Errorf(fmt.Sprintf("merging of two overlapping rects failed, got %v but expected %v",
+			t2, m2))
+	}
+
+	r3 := PathBoundary(path3)
+	m3 := MergeGeoRect(r1, r3)
+	t3 := GeoRect{
+		NorthWest: GeoPoint{42.365592, -71.116022},
+		SouthEast: GeoPoint{42.359000, -71.096162},
+	}
+	if !reflect.DeepEqual(m3, t3) {
+		t.Errorf(fmt.Sprintf("merging of two non-overlapping rects failed, got %v but expected %v",
+			t3, m3))
+	}
+}
+
+func TestOverlaps(t *testing.T) {
+
+	r1 := PathBoundary(path1)
+	r2 := PathBoundary(path2)
+	
+	if r1.Overlaps(r2) != true {
+		t.Errorf("false negative error on overlap detection")
+	}
+
+	r3 := PathBoundary(path3)
+	if r1.Overlaps(r3) != false {
+		t.Errorf("false positive error on overlap detection")
+	}
+}
+
+func TestPathSimilarity(t *testing.T) {
+	score := PathSimilarity(50.0, 50.0, path1, path2)
+	if score < 0 {
+		t.Errorf("similarity score should be between 0 and 1")
+	}
 }

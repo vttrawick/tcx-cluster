@@ -22,15 +22,29 @@ type GeoRect struct {
 
 type cellCoord string
 
-// a geo grid is some GeoRect split into cells
+// a GeoGrid is a GeoRect split into cells
 // of width CellWdith and height CellHeight.
-// The grid can contain points, which are represented as a map
-// from grid coordinates to a slice of GeoPoints
+// This can be used to map GeoPoints to cells
 // CellWidth and CellHeight are in meters
 type GeoGrid struct {
 	Boundary GeoRect
 	CellWidth, CellHeight float64
-	Cells map[cellCoord][]GeoPoint
+}
+
+func (r GeoRect) MinLat() float64 {
+	return r.SouthEast.LatitudeInDegrees
+}
+
+func (r GeoRect) MaxLat() float64 {
+	return r.NorthWest.LatitudeInDegrees
+}
+
+func (r GeoRect) MinLon() float64 {
+	return r.NorthWest.LongitudeInDegrees
+}
+
+func (r GeoRect) MaxLon() float64 {
+	return r.SouthEast.LongitudeInDegrees
 }
 
 // assuming these points are only a few miles away (up to 30)
@@ -51,7 +65,7 @@ func GeoDistance(p1, p2 GeoPoint) float64 {
 	return EarthRadiusInMeters * math.Sqrt((dLat * dLat) + (dLon * dLon))
 }
 
-func GridBoundary(paths ...[]GeoPoint) GeoRect {
+func PathBoundary(paths ...[]GeoPoint) GeoRect {
 
 	minLat := float64(91)
 	maxLat := float64(-91)
@@ -80,58 +94,47 @@ func GridBoundary(paths ...[]GeoPoint) GeoRect {
 	}
 }
 
-// map each point in a set of paths to a coordinate on a GeoGrid
-func PathToGeoGrid(cellWidth, cellHeight float64, paths ...[]GeoPoint) *GeoGrid {
-	
-	boundary := GridBoundary(paths...)
-
-	cells := make(map[cellCoord][]GeoPoint)
-
+func MakeGrid(cellWidth, cellHeight float64, boundary GeoRect) *GeoGrid {
 	grid := GeoGrid{
 		Boundary: boundary,
 		CellWidth: cellWidth,
 		CellHeight: cellHeight,
-		Cells: cells,
-	}
-
-	for _, path := range paths {
-		for _, point := range path {
-			coord := cellForPoint(point, &grid)
-			if grid.Cells[coord] == nil {
-				grid.Cells[coord] = make([]GeoPoint, 1)
-			}
-			grid.Cells[coord] = append(grid.Cells[coord], point)
-		}
 	}
 	return &grid
 }
 
-func cellForPoint(point GeoPoint, grid *GeoGrid) cellCoord {
+func (g *GeoGrid) MapPoint(point GeoPoint) cellCoord {
 
-	minLat := grid.Boundary.SouthEast.LatitudeInDegrees
-	maxLat := grid.Boundary.NorthWest.LatitudeInDegrees
-	minLon := grid.Boundary.NorthWest.LongitudeInDegrees
-	maxLon := grid.Boundary.SouthEast.LongitudeInDegrees
+	// meridian distances don't vary with longitude
+	gridNorthSouthDistance := GeoDistance(GeoPoint{g.Boundary.MinLat(), g.Boundary.MinLon()},
+		GeoPoint{g.Boundary.MaxLat(), g.Boundary.MinLon()})
 
-	// meridian distances don't vary with latitude / longitude
-	meridianDistance := GeoDistance(GeoPoint{minLat, minLon},
-		GeoPoint{maxLat, minLon})
+	pointOffset := GeoDistance(GeoPoint{point.LatitudeInDegrees, g.Boundary.MinLon()},
+		GeoPoint{g.Boundary.MaxLat(), g.Boundary.MinLon()})
 
-	pointOffset := GeoDistance(GeoPoint{point.LatitudeInDegrees, minLon},
-		GeoPoint{maxLat, minLon})
+	latIndex := cellSearch(0, gridNorthSouthDistance, g.CellHeight, pointOffset, 0)
 
-	latIndex := cellSearch(0, meridianDistance, grid.CellHeight, pointOffset, 0)
+	// distances along a parallel do vary with latitude
+	// e.g. a degree of latitude is a longer distance at the equator
+	// than further north / south. So the lat of the point for correctness.
+	// The grid in fact has more cells per row closer to the equator
+	gridEastWestDistance := GeoDistance(GeoPoint{point.LatitudeInDegrees, g.Boundary.MinLon()},
+		GeoPoint{point.LatitudeInDegrees, g.Boundary.MaxLon()})
 
-	// however, distances along a parallel vary with latitude
-	parallelDistance := GeoDistance(GeoPoint{point.LatitudeInDegrees, minLon},
-		GeoPoint{point.LatitudeInDegrees, maxLon})
+	pointOffset = GeoDistance(GeoPoint{g.Boundary.MinLat(), point.LongitudeInDegrees},
+		GeoPoint{g.Boundary.MinLat(), g.Boundary.MinLon()})
 
-	pointOffset = GeoDistance(GeoPoint{minLat, point.LongitudeInDegrees},
-		GeoPoint{minLat, maxLon})
-
-	lonIndex := cellSearch(0, parallelDistance, grid.CellWidth, pointOffset, 0)
+	lonIndex := cellSearch(0, gridEastWestDistance, g.CellWidth, pointOffset, 0)
 	
 	return cellCoord(fmt.Sprintf("%d_%d", latIndex, lonIndex))
+}
+
+func (g *GeoGrid) MapPath(path []GeoPoint) []cellCoord {
+	coordList := make([]cellCoord, len(path))
+	for i, point := range(path) {
+		coordList[i] = g.MapPoint(point)
+	}
+	return coordList
 }
 
 // binary search through a given range to find the index of the cell
@@ -156,4 +159,97 @@ func cellSearch(min, max, cellSize, loc float64, offset int) int {
 		max = midpoint
 		return cellSearch(min, max, cellSize, loc, offset)
 	}
+}
+
+func PathLengthInMeters(path []GeoPoint) float64 {
+
+	pathLength := 0.0
+	for i := 1; i < len(path); i++ {
+		pathLength += GeoDistance(path[i], path[i-1])
+	}
+	return pathLength
+}
+
+func (r1 GeoRect) Overlaps(r2 GeoRect) bool {
+	// longitude always decreases to the west, until the anti-meridian
+	// If data is from Taveuni or somewhere like that this will just be wrong.
+	if r1.MinLon() >= r2.MaxLon() || r2.MinLon() >= r1.MaxLon() {
+		return false
+	}
+
+	// Latitude can get weird around the poles, but this should still work
+	// More likely is th rectangles being totally misrepresented
+	if r1.MinLat() >= r2.MaxLat() || r2.MinLat() >= r1.MaxLat() {
+		return false
+	}
+
+	return true	
+}
+
+func MergeGeoRect(rlist ...GeoRect) GeoRect {
+
+	merged := GeoRect{
+		NorthWest: GeoPoint{-91, 181},
+		SouthEast: GeoPoint{91, -181},
+	}
+
+	for _, r := range(rlist) {
+
+		if r.MinLat() < merged.MinLat() {
+			merged.SouthEast.LatitudeInDegrees = r.SouthEast.LatitudeInDegrees
+		}
+		if r.MaxLat() > merged.MaxLat() {
+			merged.NorthWest.LatitudeInDegrees = r.NorthWest.LatitudeInDegrees
+		}
+		if r.MinLon() < merged.MinLon() {
+			merged.NorthWest.LongitudeInDegrees = r.NorthWest.LongitudeInDegrees
+		}
+		if r.MaxLon() > merged.MaxLon() {
+			merged.SouthEast.LongitudeInDegrees = r.SouthEast.LongitudeInDegrees
+		}
+	}
+
+	return merged
+}
+
+func PathSimilarity(cellWidth, cellHeight float64, path1, path2 []GeoPoint) float64 {
+
+
+	boundary1 := PathBoundary(path1)
+	boundary2 := PathBoundary(path2)
+
+	if !boundary1.Overlaps(boundary2) {
+		return 0.0
+	}
+	sharedBoundary := MergeGeoRect(boundary1, boundary2)
+
+	grid := MakeGrid(cellWidth, cellHeight, sharedBoundary)
+
+	coords1 := grid.MapPath(path1)
+	coords2 := grid.MapPath(path2)
+
+	// find the size of the difference between the two sets of coordinates
+	inCoords1 := make(map[cellCoord]bool)
+	inCoords2 := make(map[cellCoord]bool)
+	for _, coord := range(coords1) {
+		inCoords1[coord] = true
+	}
+	for _, coord := range(coords2) {
+		inCoords2[coord] = true		
+	}
+
+	diffCount := 0
+	for coord := range(inCoords1) {
+		if !inCoords2[coord] {
+			diffCount++
+		}
+	}
+	for coord := range(inCoords2) {
+		if !inCoords1[coord] {
+			diffCount++
+		}
+	}
+	
+	totalPathLength := PathLengthInMeters(path1) + PathLengthInMeters(path2)
+	return 1 - (float64(diffCount) * cellWidth / totalPathLength)
 }
