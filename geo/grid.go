@@ -5,10 +5,6 @@ import (
 	"fmt"
 )
 
-const EarthRadiusInMeters float64 = 6371.0088 * 1000
-// a change in one degree of latitude along a meridian is about 111.32km
-const LatitudeDegreesToMeters float64 = 111.32 * 1000
-
 // a coordinate on the earth represented by lat / lon degrees
 type GeoPoint struct {
 	LatitudeInDegrees, LongitudeInDegrees float64
@@ -45,53 +41,6 @@ func (r GeoRect) MinLon() float64 {
 
 func (r GeoRect) MaxLon() float64 {
 	return r.SouthEast.LongitudeInDegrees
-}
-
-// accurate assuming these points no further than a few miles apart
-// always returns a positive real number
-func GeoDistance(p1, p2 GeoPoint) float64 {
-
-	dLat := p1.LatitudeInDegrees - p2.LatitudeInDegrees
-	dLat = math.Pi * dLat / 180
-
-	dLon := p1.LongitudeInDegrees - p2.LongitudeInDegrees
-	dLon = math.Pi * dLon / 180
-
-	// take the average latitude and use that to shorten the latitude circle
-	avgLat := (p1.LatitudeInDegrees + p2.LatitudeInDegrees) / 2
-	avgLat = math.Pi * avgLat / 180
-	dLon = math.Cos(avgLat) * dLon
-	
-	return EarthRadiusInMeters * math.Sqrt((dLat * dLat) + (dLon * dLon))
-}
-
-func PathBoundary(paths ...[]GeoPoint) GeoRect {
-
-	minLat := float64(91)
-	maxLat := float64(-91)
-	minLon := float64(181)
-	maxLon := float64(-181)
-
-	for _, path := range(paths) {
-		for _, pt := range(path) {
-			if pt.LatitudeInDegrees < minLat {
-				minLat = pt.LatitudeInDegrees
-			}
-			if pt.LatitudeInDegrees > maxLat {
-				maxLat = pt.LatitudeInDegrees
-			}
-			if pt.LongitudeInDegrees < minLon {
-				minLon = pt.LongitudeInDegrees
-			}
-			if pt.LongitudeInDegrees > maxLon {
-				maxLon = pt.LongitudeInDegrees
-			}
-		}
-	}
-	return GeoRect{
-		NorthWest: GeoPoint{maxLat, minLon},
-		SouthEast: GeoPoint{minLat, maxLon},
-	}
 }
 
 func MakeGrid(cellWidth, cellHeight float64, boundary GeoRect) *GeoGrid {
@@ -161,15 +110,6 @@ func cellSearch(min, max, cellSize, loc float64, offset int) int {
 	}
 }
 
-func PathLengthInMeters(path []GeoPoint) float64 {
-
-	pathLength := 0.0
-	for i := 1; i < len(path); i++ {
-		pathLength += GeoDistance(path[i], path[i-1])
-	}
-	return pathLength
-}
-
 func (r1 GeoRect) Overlaps(r2 GeoRect) bool {
 	// longitude always decreases to the west, until the anti-meridian
 	// If data is from Taveuni or somewhere like that this will just be wrong.
@@ -208,48 +148,5 @@ func MergeGeoRect(rlist ...GeoRect) GeoRect {
 			merged.SouthEast.LongitudeInDegrees = r.SouthEast.LongitudeInDegrees
 		}
 	}
-
 	return merged
-}
-
-func PathSimilarity(cellWidth, cellHeight float64, path1, path2 []GeoPoint) float64 {
-
-
-	boundary1 := PathBoundary(path1)
-	boundary2 := PathBoundary(path2)
-
-	if !boundary1.Overlaps(boundary2) {
-		return 0.0
-	}
-	sharedBoundary := MergeGeoRect(boundary1, boundary2)
-
-	grid := MakeGrid(cellWidth, cellHeight, sharedBoundary)
-
-	coords1 := grid.MapPath(path1)
-	coords2 := grid.MapPath(path2)
-
-	// find the size of the difference between the two sets of coordinates
-	inCoords1 := make(map[cellCoord]bool)
-	inCoords2 := make(map[cellCoord]bool)
-	for _, coord := range(coords1) {
-		inCoords1[coord] = true
-	}
-	for _, coord := range(coords2) {
-		inCoords2[coord] = true		
-	}
-
-	diffCount := 0
-	for coord := range(inCoords1) {
-		if !inCoords2[coord] {
-			diffCount++
-		}
-	}
-	for coord := range(inCoords2) {
-		if !inCoords1[coord] {
-			diffCount++
-		}
-	}
-	
-	totalPathLength := PathLengthInMeters(path1) + PathLengthInMeters(path2)
-	return 1 - (float64(diffCount) * cellWidth / totalPathLength)
 }
