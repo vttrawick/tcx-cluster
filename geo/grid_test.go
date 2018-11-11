@@ -287,8 +287,22 @@ func TestOverlaps(t *testing.T) {
 }
 
 func TestPathSimilarity(t *testing.T) {
-	score := PathSimilarity(50.0, 50.0, path1, path2)
-	if score < 0 {
-		t.Errorf("similarity score should be between 0 and 1")
+
+	// test that the same path has a similarity of 1
+	// and two paths with different boundaries have a similarity of 0
+	// and two paths that are somewhat similar have a score between those two numbers
+	score := PathSimilarity(10.0, 10.0, path1, path1)
+	if score != 1 {
+		t.Errorf("the exact same path should return a score of 1")
+	}
+
+	score = PathSimilarity(10.0, 10.0, path1, path3)
+	if score != 0 {
+		t.Errorf("two paths with non-overlapping boundaries should return a score of 0")
+	}
+
+	score = PathSimilarity(10.0, 10.0, path1, path2)
+	if !(score > 0 && score < 1) {
+		t.Errorf("two somewhat similar paths should return a score between 0 and 1")
 	}
 }

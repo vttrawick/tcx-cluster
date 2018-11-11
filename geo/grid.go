@@ -47,7 +47,7 @@ func (r GeoRect) MaxLon() float64 {
 	return r.SouthEast.LongitudeInDegrees
 }
 
-// assuming these points are only a few miles away (up to 30)
+// accurate assuming these points no further than a few miles apart
 // always returns a positive real number
 func GeoDistance(p1, p2 GeoPoint) float64 {
 
