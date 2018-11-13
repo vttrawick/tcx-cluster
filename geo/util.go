@@ -8,6 +8,9 @@ const EarthRadiusInMeters float64 = 6371.0088 * 1000
 // a change in one degree of latitude along a meridian is about 111.32km
 const LatitudeDegreesToMeters float64 = 111.32 * 1000
 
+const FeetPerMile = 5280.0
+const FeetPerMeter = 3.28084
+
 // accurate assuming these points no further than a few miles apart
 // always returns a positive real number
 func GeoDistance(p1, p2 GeoPoint) float64 {
