@@ -8,6 +8,7 @@ import (
 	"github.com/vttrawick/tcx-cluster/geo"
 	"io/ioutil"
 	"log"
+	"sort"
 	"path/filepath"
 	"regexp"
 )
@@ -16,17 +17,58 @@ func main() {
 
 	// command line flags
 	var tcxdir string
+	var printClusters bool
 	flag.StringVar(&tcxdir,
 		"tcxdir",
 		"",
 		"directory containing tcx files to cluster")
+	flag.BoolVar(&printClusters,
+		"printclusters",
+		false,
+		"print out information about clusters of 2 or more paths")
 
 	flag.Parse()
 
 	tcxlist := LoadTCXDir(tcxdir)
 	paths := tcx2path(tcxlist)
 	clusters := geo.ClusterPaths(7.0, paths...)
+
+	// sort the clusters by size desc, then by distance desc
+	if printClusters {
+		PrintClusters(clusters)
+	}
+
 	fmt.Printf("%d paths have been filtered into %d clusters\n", len(paths), len(clusters))
+}
+
+func PrintClusters(clusters []geo.PathCluster) {
+
+	sort.Slice(clusters, func(i, j int) bool {
+		if len(clusters[i].ContainedPaths) > len(clusters[j].ContainedPaths) {
+			return true
+		}
+		if len(clusters[i].ContainedPaths) < len(clusters[j].ContainedPaths) {
+			return false
+		}
+		// if contained cluster size is equal continue to next check
+		if clusters[i].DistanceInMeters > clusters[j].DistanceInMeters {
+			return true
+		} else {
+			return false
+		}
+	})
+	for _, cluster := range(clusters) {
+		if len(cluster.ContainedPaths) > 1 {
+			cluster.Print()
+			fmt.Printf("\n")
+			for _, path := range(cluster.ContainedPaths) {
+				fmt.Printf("path has distance of %f on date %v\n",
+					(path.DistanceInMeters * geo.FeetPerMeter / geo.FeetPerMile),
+					path.Date)
+			}
+			fmt.Printf("\n\n")
+		}
+	}
 }
 
 func LoadTCXDir(tcxdir string) []*tcx.Tcx {

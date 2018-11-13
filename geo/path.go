@@ -2,6 +2,8 @@ package geo
 
 import (
 	"time"
+	"fmt"
+	"math"
 )
 
 type TraveledPath struct {
@@ -80,24 +82,28 @@ func PathSimilarity(cellWidth, cellHeight float64, path1, path2 []GeoPoint) floa
 	}
 
 	diffCount := 0
+	matchCount := 0
 	for coord := range(inCoords1) {
 		if !inCoords2[coord] {
 			diffCount++
+		} else {
+			matchCount++
 		}
 	}
 	for coord := range(inCoords2) {
 		if !inCoords1[coord] {
 			diffCount++
+		} else {
+			matchCount++
 		}
 	}
-	
-	totalPathLength := PathLengthInMeters(path1) + PathLengthInMeters(path2)
-	return 1 - (float64(diffCount) * cellWidth / totalPathLength)
+	return 1 - float64(diffCount) / float64(diffCount + matchCount)
 }
 
 func ClusterPaths(res float64, paths ...TraveledPath) []PathCluster {
 
-	threshold := 0.95
+	slimit := 0.35
+	dlimit := 0.05
 	clusters := make([]PathCluster, 0)
 
 	for _, path := range(paths) {
@@ -107,8 +113,11 @@ func ClusterPaths(res float64, paths ...TraveledPath) []PathCluster {
 		for j := 0; j < len(clusters) && match < 0; j++ {
 
 			similarity := PathSimilarity(res, res, clusters[j].ReferencePath.Points, path.Points)
-
-			if similarity > threshold {
+			
+			refPathDistance := clusters[j].ReferencePath.DistanceInMeters
+			avgDistance := (path.DistanceInMeters + refPathDistance) / 2
+			distanceDelta := math.Abs(path.DistanceInMeters - refPathDistance) / avgDistance
+			if similarity > slimit && distanceDelta < dlimit {
 				match = j
 				clusters[j].ContainedPaths = append(clusters[j].ContainedPaths, path)
 			}
@@ -124,4 +133,11 @@ func ClusterPaths(res float64, paths ...TraveledPath) []PathCluster {
 		}
 	}
 	return clusters
+}
+
+func (c PathCluster) Print() {
+	fmt.Printf("\tCluster Size: %d\n\tDistance: %f miles\n\tDate of Exemplar Path: %v",
+		len(c.ContainedPaths),
+		(c.DistanceInMeters * FeetPerMeter / FeetPerMile),
+		c.ReferencePath.Date)
 }
